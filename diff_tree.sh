@@ -7,13 +7,20 @@ BINUTILS_PREFIX="powerpc-linux-gnu-"
 
 make_idb () {
     echo "Creating IDB for $1"
-    if [ ! -f "$1.idb" ]; then
+    if file "$1" | grep -q "64-bit" ; then
+        ext="i64"
+        ida64="64"
+    else
+        ext="idb"
+        ida64=""
+    fi
+    if [ ! -f "$1.${ext}" ]; then
         size=$(stat -c%s "$1")
         if [ $((size)) -gt $((10*1024*1024)) ]; then
             echo "file too big"
         else
             dest=$(readlink -f "$(dirname "$1")")
-            TVHEADLESS=1 ida -Llog -B -A "-OBinExportAutoAction:BinExportBinary" "-OBinExportModule:$dest/" "-S$HOME/.idapro/mybinexport.idc" "$1"
+            TVHEADLESS=1 "ida${ida64}" -Llog -B -A "-OBinExportAutoAction:BinExportBinary" "-OBinExportModule:$dest/" "-S$HOME/.idapro/mybinexport.idc" "$1"
         fi
     fi
 }
@@ -23,12 +30,19 @@ if [ $# -lt 3 ]; then
     exit 1
 fi
 
+
 store=$1
 old=$2
 new=$3
 
+if [[ "${old: -1}" != "/" || "${new: -1}" != "/" ]]; then
+    echo "both paths should end with /"
+    exit 1
+fi
+
 if [ ! -f "$store/difflist" ] ; then
-    (rsync --links -rcn --out-format="%n" "$old" "$new" && rsync --links -rcn --out-format="%n" "$new" "$old") | sort | uniq > "$store/difflist"
+    # TODO handle new files (rsync --links -rcn --out-format="%n" "$old" "$new" && rsync --links -rcn --out-format="%n" "$new" "$old") | sort | uniq > "$store/difflist"
+    rsync --links -rcn --out-format="%n" "$old" "$new" | sort | uniq > "$store/difflist"
     cat "$store/difflist" | sed "s;^;$old;" | xargs file | grep ELF | cut -d':' -f 1 | sed "s;^$old;;" > "$store/diff_elf"
     cat "$store/difflist" | sed "s;^;$old;" | xargs file | grep -v ELF | cut -d':' -f 1 | sed "s;^$old;;" > "$store/diff_not_elf"
 fi
@@ -52,6 +66,8 @@ cat "$store/diff_elf" | while read -r elf ; do
 done
 
 cat "$store/diff_not_elf" | while read -r file ; do
-    filename=$(basename "$old/$file")
-    diff -u "$old/$file" "$new/$file" | tee "$store/${filename}.diff"
+    if [ -f "$old/$file" ]; then
+        filename=$(basename "$old/$file")
+        diff -u "$old/$file" "$new/$file" | tee "$store/${filename}.diff"
+    fi
 done
